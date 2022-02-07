@@ -2,7 +2,7 @@ module PhotoGroove exposing (main, view)
 
 import Array exposing (Array)
 import Browser
-import Html exposing (Html, button, div, h1, img, input, label, text)
+import Html exposing (Html, button, div, h1, img, input, label, select, text)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick)
 import Random
@@ -52,15 +52,28 @@ sizeToString size =
 
 view : Model -> Html Msg
 view model =
-    div [ class "content" ]
-        [ h1 [] [ text "Photo Groove" ]
-        , div [ id "choose-size" ]
-            (List.map (viewSizeChooser model.chosenSize) [ Small, Medium, Large ])
-        , button [ onClick SurpriseClick ] [ text "Surprise me" ]
-        , div [ id "thumbnails", class (sizeToString model.chosenSize) ]
-            (List.map (viewThumbnail model.selectedUrl) model.photos)
-        , img [ class "large", src (urlPrefix ++ "large/" ++ model.selectedUrl) ] []
-        ]
+    div [ class "content" ] <|
+        case model.status of
+            Loading ->
+                []
+
+            Loaded photos selectedUrl ->
+                viewLoaded photos selectedUrl model.chosenSize
+
+            Errored errorMsg ->
+                [ text ("Error: " ++ errorMsg) ]
+
+
+viewLoaded : List Photo -> String -> ThumbnailSize -> List (Html Msg)
+viewLoaded photos selectedUrl chosenSize =
+    [ h1 [] [ text "Photo Groove" ]
+    , div [ id "choose-size" ]
+        (List.map (viewSizeChooser chosenSize) [ Small, Medium, Large ])
+    , button [ onClick SurpriseClick ] [ text "Surprise me" ]
+    , div [ id "thumbnails", class (sizeToString chosenSize) ]
+        (List.map (viewThumbnail selectedUrl) photos)
+    , img [ class "large", src (urlPrefix ++ "large/" ++ selectedUrl) ] []
+    ]
 
 
 type ThumbnailSize
@@ -92,29 +105,9 @@ initialModel =
     }
 
 
-photoArray : Array Photo
-photoArray =
-    Array.fromList initialModel.photos
-
-
-getPhotoUrl : Int -> String
-getPhotoUrl index =
-    case Array.get index photoArray of
-        Just photo ->
-            photo.url
-
-        Nothing ->
-            ""
-
-
-randomPhotoPicker : Random.Generator Int
-randomPhotoPicker =
-    Random.int 0 (Array.length photoArray - 1)
-
-
 type Msg
     = ImgClick String
-    | GotSelectedIndex Int
+    | GotRandomPhoto Photo
     | SurpriseClick
     | SizeClick ThumbnailSize
 
@@ -123,16 +116,42 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         ImgClick url ->
-            ( { model | selectedUrl = url }, Cmd.none )
-
-        GotSelectedIndex index ->
-            ( { model | selectedUrl = getPhotoUrl index }, Cmd.none )
+            ( { model | status = selectUrl url model.status }, Cmd.none )
 
         SurpriseClick ->
-            ( model, Random.generate GotSelectedIndex randomPhotoPicker )
+            case model.status of
+                Loaded (firstPhoto :: rest) _ ->
+                    Random.uniform firstPhoto rest
+                        |> Random.generate GotRandomPhoto
+                        |> Tuple.pair model
+
+                Loaded [] _ ->
+                    ( model, Cmd.none )
+
+                Loading ->
+                    ( model, Cmd.none )
+
+                Errored _ ->
+                    ( model, Cmd.none )
+
+        GotRandomPhoto photo ->
+            ( { model | status = selectUrl photo.url model.status }, Cmd.none )
 
         SizeClick size ->
             ( { model | chosenSize = size }, Cmd.none )
+
+
+selectUrl : String -> Status -> Status
+selectUrl url status =
+    case status of
+        Loaded photos _ ->
+            Loaded photos url
+
+        Loading ->
+            status
+
+        Errored _ ->
+            status
 
 
 main : Program () Model Msg
